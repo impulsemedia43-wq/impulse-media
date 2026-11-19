@@ -1,7 +1,6 @@
 -- =====================================================================
 -- IMPULSE MEDIA — agendador dos avisos
--- Antes de rodar, troque SEU-PROJETO pelo código do projeto (aparece na URL do Supabase)
--- Depois: SQL Editor > New query > cole tudo > Run
+-- Pronto pra rodar: SQL Editor > New query > cole tudo > Run
 -- =====================================================================
 create extension if not exists pg_cron;
 create extension if not exists pg_net;
@@ -13,7 +12,7 @@ select cron.schedule(
   '*/5 * * * *',   -- a cada 5 minutos
   $$
   select net.http_post(
-    url     := 'https://SEU-PROJETO.supabase.co/functions/v1/notify',
+    url     := 'https://cngohlvlopnzndwjchjl.supabase.co/functions/v1/notify',
     headers := '{"Content-Type":"application/json"}'::jsonb,
     body    := '{}'::jsonb
   );
