@@ -621,6 +621,7 @@ document.addEventListener('visibilitychange', async () => {
 
 async function boot() {
   setTheme(theme);
+  setTimeout(() => window.__splashDone && window.__splashDone(), 0);
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => { });
   if (DEMO) {
     $('demo').innerHTML = '<div class="demo-bar">Modo demonstração: dados de exemplo, nada é salvo</div>';
