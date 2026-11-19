@@ -234,9 +234,10 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 <div class="sheet" id="sheet" role="dialog" aria-modal="true"></div>
 <div class="banner" id="banner" aria-live="polite"><img src="icons/logo-96.jpg" alt=""><div><div class="a"><b>IMPULSE</b><span>agora</span></div><div class="b" id="bnT"></div><div class="cc" id="bnS"></div></div></div>
 <script>
-window.onerror=function(m,s,l){var v=document.getElementById('view');if(v)v.innerHTML='<p style="padding:40px 20px;color:#E5372B">Erro: '+m+' (linha '+l+')</p>';};
+window.__errs=[];window.onerror=function(m,s,l){window.__errs.push(m+' @'+s+':'+l);if(/^Script error/.test(m)||!l)return;var v=document.getElementById('view');if(v&&/Carregando/.test(v.textContent))v.innerHTML='<p style="padding:40px 20px;color:#E5372B">Erro: '+m+' (linha '+l+')</p>';};
 </script>
 <script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js" crossorigin="anonymous"></script>
 <script type="module" src="app.js"></script>
 </body>
 </html>

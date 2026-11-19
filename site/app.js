@@ -626,7 +626,8 @@ async function boot() {
     $('demo').innerHTML = '<div class="demo-bar">Modo demonstração: dados de exemplo, nada é salvo</div>';
     DEMO_STORE = demoData(); await start(); return;
   }
-  const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm');
+  if (!window.supabase || !window.supabase.createClient) { $('view').innerHTML = '<div class="loading" style="padding:0 30px;text-align:center">Não deu pra carregar. Confira a internet e abra de novo.<br><br><button class="btn" onclick="location.reload()">Tentar de novo</button></div>'; return; }
+  const { createClient } = window.supabase;
   sb = createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
   const hash = location.hash, invite = /type=(invite|signup)/.test(hash), recovery = /type=recovery/.test(hash);
   sb.auth.onAuthStateChange((ev) => { if (ev === 'PASSWORD_RECOVERY') setTimeout(() => newPasswordSheet(false), 800); });
