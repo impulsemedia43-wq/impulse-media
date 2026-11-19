@@ -538,7 +538,7 @@ async function pushState() {
   try { const reg = await navigator.serviceWorker.ready; const sub = await reg.pushManager.getSubscription(); return sub && Notification.permission === 'granted' ? 'ativo' : 'inativo'; } catch (e) { return 'inativo'; }
 }
 async function fn(body, auth) {
-  const h = { 'Content-Type': 'application/json', apikey: CFG.SUPABASE_ANON_KEY, Authorization: 'Bearer ' + CFG.SUPABASE_ANON_KEY };
+  const h = { 'Content-Type': 'application/json', apikey: CFG.SUPABASE_ANON_KEY };
   if (auth) { const { data } = await sb.auth.getSession(); if (data.session) h.Authorization = 'Bearer ' + data.session.access_token; }
   const r = await fetch(CFG.SUPABASE_URL + '/functions/v1/notify', { method: 'POST', headers: h, body: JSON.stringify(body) });
   return r.json();

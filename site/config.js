@@ -4,6 +4,6 @@
 // Enquanto estiver vazio, o app abre em MODO DEMONSTRAÇÃO com dados de exemplo.
 // =====================================================================
 window.IMPULSE_CONFIG = {
-  SUPABASE_URL: '',        // ex: 'https://abcdefgh.supabase.co'
-  SUPABASE_ANON_KEY: ''    // a chave "anon public" (é pública, pode ficar aqui)
+  SUPABASE_URL: 'https://cngohlvlopnzndwjchjl.supabase.co',
+  SUPABASE_ANON_KEY: 'sb_publishable_eZkIcejvoO9Oil-jgI3zJw_NX1qrE0Y'   // chave pública (publishable)
 };
