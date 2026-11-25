@@ -26,8 +26,11 @@ function longDate(d) { return `${cap(WD[d.getDay()])}${d.getDay() > 0 && d.getDa
 
 /* ---------------- utilidades ---------------- */
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-function fmt(v) { v = Number(v) || 0; const r = Math.round(v * 100) / 100, d = r % 1 ? 2 : 0; return 'R$ ' + r.toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d }); }
-const fmt2 = (v) => 'R$ ' + (Number(v) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+let HIDE = false; try { HIDE = localStorage.getItem('im_hide') === '1'; } catch (e) { }
+const MASK = 'R$ •••';
+function fmt(v) { if (HIDE) return MASK; v = Number(v) || 0; const r = Math.round(v * 100) / 100, d = r % 1 ? 2 : 0; return 'R$ ' + r.toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d }); }
+function fmtReal(v) { const h = HIDE; HIDE = false; const r = fmt(v); HIDE = h; return r; }
+const fmt2 = (v) => HIDE ? MASK : 'R$ ' + (Number(v) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const sum = (l) => l.reduce((s, x) => s + Number(x.valor || 0), 0);
 const $ = (id) => document.getElementById(id);
 const val = (id) => ($(id) ? $(id).value.trim() : '');
@@ -153,6 +156,8 @@ const SV = {
   cam: '<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-4px;margin-right:7px"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3"/></svg>',
   doc: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14H6zM9 12h7M9 16h7M9 8h3"/></svg>',
   docW: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14H6zM9 12h7M9 16h7M9 8h3"/></svg><span>Gerar PDF e enviar</span>',
+  eye: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
+  eyeOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.6 5.1A10 10 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.2 4M6.6 6.6A17 17 0 0 0 2 12s3.6 7 10 7a9.7 9.7 0 0 0 5.4-1.6M9.9 9.9a3 3 0 0 0 4.2 4.2M3 3l18 18"/></svg>',
   clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>'
 };
 const TABI = {
@@ -187,7 +192,7 @@ function go(t) { tab = t; drawTabs(); render(); window.scrollTo(0, 0); }
 let notifSeen = '';
 function navrow(plusFn, label) {
   const l = notifs(), key = l.map((x) => x.t).join('|'), n = key === notifSeen ? 0 : l.length;
-  return `<div class="navrow"><button class="av" onclick="openSettings()" aria-label="Ajustes"><img src="icons/logo-96.jpg" alt=""></button><span class="sp"></span><button class="nb" onclick="openNotifs()" aria-label="Avisos">${SV.bell}${n ? `<span class="bd">${n}</span>` : ''}</button>${plusFn ? `<button class="nb" onclick="${plusFn}" aria-label="${label}">${SV.plus}</button>` : ''}</div>`;
+  return `<div class="navrow"><button class="av" onclick="openSettings()" aria-label="Ajustes"><img src="icons/logo-96.jpg" alt=""></button><span class="sp"></span><button class="nb" onclick="toggleHide()" aria-label="${HIDE ? 'Mostrar valores' : 'Esconder valores'}">${HIDE ? SV.eyeOff : SV.eye}</button><button class="nb" onclick="openNotifs()" aria-label="Avisos">${SV.bell}${n ? `<span class="bd">${n}</span>` : ''}</button>${plusFn ? `<button class="nb" onclick="${plusFn}" aria-label="${label}">${SV.plus}</button>` : ''}</div>`;
 }
 function cell(o) {
   const tag = o.on ? 'button' : 'div';
@@ -480,7 +485,7 @@ async function unpay(id) {
   if (await act(async () => { await db.remove('transactions', p.id); S.tx = S.tx.filter((x) => x.id !== p.id); })) openClient(id, fromBoard);
 }
 function cobrar(id) {
-  const c = client(id), msg = `Oi! Passando pra lembrar da mensalidade da Impulse Media (${fmt(c.valor)}), com vencimento no dia ${c.venc}. Qualquer coisa me chama!`;
+  const c = client(id), msg = `Oi! Passando pra lembrar da mensalidade da Impulse Media (${fmtReal(c.valor)}), com vencimento no dia ${c.venc}. Qualquer coisa me chama!`;
   const digits = String(c.phone || '').replace(/\D/g, '');
   if (digits) { const n = digits.length <= 11 ? '55' + digits : digits; window.location.href = `https://wa.me/${n}?text=${encodeURIComponent(msg)}`; return; }
   try { navigator.clipboard.writeText(msg).then(() => banner('Cobrança copiada', 'Cole no WhatsApp do cliente.'), () => banner('Não deu pra copiar', 'Cadastre o WhatsApp do cliente em Editar.')); } catch (e) { banner('Não deu pra copiar', 'Cadastre o WhatsApp do cliente em Editar.'); }
@@ -692,6 +697,10 @@ async function testPush() {
   catch (e) { banner('Não deu pra testar', 'Confira a internet.'); }
 }
 
+function toggleHide() {
+  HIDE = !HIDE; try { localStorage.setItem('im_hide', HIDE ? '1' : '0'); } catch (e) { }
+  render(); banner(HIDE ? 'Valores escondidos' : 'Valores visíveis', HIDE ? 'Pode gravar a tela tranquila.' : '');
+}
 /* ---------------- ajustes ---------------- */
 function setTheme(t) { theme = t; document.documentElement.setAttribute('data-theme', t); try { localStorage.setItem('im_theme', t); } catch (e) { } }
 async function setToggle(k, el) { S.toggles[k] = !S.toggles[k]; el.classList.toggle('on', S.toggles[k]); try { await db.saveSettings(S.toggles); } catch (e) { banner('Não deu pra salvar', 'Confira a internet.'); } }
@@ -793,7 +802,7 @@ function demoData() {
 }
 
 /* expõe as funções usadas nos botões */
-Object.assign(window, { newPasswordSheet, markEdit, undoEdit, newVisit, saveVisit, openVisit, delVisit, openReport, rMonthGet, makePDF, fromBoardFlag, go, render, drawCList, openBoard, openClient, markPost, undoPost, receive, unpay, cobrar, newClient, saveClient, editClient, askDelClient, delClient, toggleRem, openRem, delRem, newReminder, remRepChange, saveRem, openEvent, delEvent, newEvent, saveEv, pickCat, newTx, openTx, saveTx, delTx, newBill, openBill, saveBill, toggleBill, delBill, openNotifs, openSettings, setTheme, setToggle, enablePush, testPush, closeSheet, doLogin, forgot, savePassword, logout, T, iso, parse, addDays, addMonths, monthKey });
+Object.assign(window, { toggleHide, newPasswordSheet, markEdit, undoEdit, newVisit, saveVisit, openVisit, delVisit, openReport, rMonthGet, makePDF, fromBoardFlag, go, render, drawCList, openBoard, openClient, markPost, undoPost, receive, unpay, cobrar, newClient, saveClient, editClient, askDelClient, delClient, toggleRem, openRem, delRem, newReminder, remRepChange, saveRem, openEvent, delEvent, newEvent, saveEv, pickCat, newTx, openTx, saveTx, delTx, newBill, openBill, saveBill, toggleBill, delBill, openNotifs, openSettings, setTheme, setToggle, enablePush, testPush, closeSheet, doLogin, forgot, savePassword, logout, T, iso, parse, addDays, addMonths, monthKey });
 Object.defineProperty(window, 'cFilter', { get: () => cFilter, set: (v) => { cFilter = v; } });
 Object.defineProperty(window, 'cQuery', { get: () => cQuery, set: (v) => { cQuery = v; } });
 Object.defineProperty(window, 'aDay', { get: () => aDay, set: (v) => { aDay = v; } });
