@@ -133,7 +133,7 @@ const txOf = (mk) => S.tx.filter((x) => x.data.slice(0, 7) === mk.slice(0, 7));
 const billPaid = (b, mk) => S.tx.find((x) => x.tipo === 'saida' && x.bill_id === b.id && x.ref_mes === (mk || T().mes));
 function notifs() {
   const t = T(), l = [];
-  S.clients.filter(isLate).forEach((c) => l.push({ t: c.name + ' não pagou', s: 'Venceu dia ' + c.venc + ', ' + fmt(c.valor), on: `openClient(${c.id})` }));
+  if (!HIDE) S.clients.filter(isLate).forEach((c) => l.push({ t: c.name + ' não pagou', s: 'Venceu dia ' + c.venc + ', ' + fmt(c.valor), on: `openClient(${c.id})` }));
   remsOn(t.iso).filter((r) => !remDone(r)).forEach((r) => l.push({ t: r.titulo, s: 'Lembrete, hoje às ' + hm(r.hora), on: `openRem(${r.id})` }));
   S.bills.filter((b) => !billPaid(b) && b.dia >= t.day && b.dia - t.day <= 2).forEach((b) => l.push({ t: b.titulo + (b.dia === t.day ? ' vence hoje' : ' vence dia ' + b.dia), s: 'Conta fixa, ' + fmt2(b.valor), on: `openBill(${b.id})` }));
   eventsOn(t.iso).forEach((e) => l.push({ t: hm(e.hora) + ' · ' + e.c.name, s: e.titulo, on: `openClient(${e.c.id})` }));
@@ -200,7 +200,7 @@ function cell(o) {
 }
 function cRow(c, money) {
   const p = pay(c), w = weekPosts(c), pd = pend(c);
-  if (money) return cell({ on: `openClient(${c.id})`, left: `<span class="ini">${esc(ini(c.name))}</span>`, t: esc(c.name), s: `${fmt(c.valor)}, todo dia ${c.venc}`, r: p.txt, rc: p.k });
+  if (money) return cell({ on: `openClient(${c.id})`, left: `<span class="ini">${esc(ini(c.name))}</span>`, t: esc(c.name), s: `${fmt(c.valor)}, todo dia ${c.venc}`, r: HIDE ? '•••' : p.txt, rc: HIDE ? '' : p.k });
   return cell({ on: `openClient(${c.id})`, left: `<span class="ini">${esc(ini(c.name))}</span>`, t: esc(c.name), s: `${w.done + w.sched} de ${c.meta} ${esc(c.tipo)} na semana`, r: pd ? 'Falta ' + pd : 'OK', rc: pd ? 'orange' : 'green' });
 }
 function remRow(r) {
@@ -225,14 +225,14 @@ function render() {
     h = navrow('newReminder()', 'Novo lembrete') + `<h1 class="lt">Hoje</h1><p class="ls">${longDate(t.d)}</p>`;
     if (!S.clients.length) h += `<div class="gh"><h3>Comece por aqui</h3></div><div class="grp">${cell({ on: 'newClient()', t: 'Cadastrar o primeiro cliente', s: 'Meta de posts, mensalidade e vencimento' })}</div>`;
     else h += `<div class="gh"><h3>Semana</h3></div><div class="grp"><button class="sum" onclick="openBoard()"><span style="flex:1"><span class="big num">${okN} <span>de ${S.clients.length} clientes em dia</span></span><span class="pbar"><i style="width:${okN / S.clients.length * 100}%;background:var(--green)"></i></span><span class="s" style="display:block;font-size:14px;color:var(--sec);margin-top:6px">${S.clients.length - okN ? (S.clients.length - okN) + ' ainda com post faltando' : 'Todo mundo em dia'}</span></span>${SV.chev}</button></div>`;
-    if (late.length) h += `<div class="gh"><h3>Não pagaram</h3><button onclick="finSeg='receber';go('financas')">Finanças</button></div><div class="grp">${late.map((c) => cRow(c, true)).join('')}</div>`;
+    if (late.length && !HIDE) h += `<div class="gh"><h3>Não pagaram</h3><button onclick="finSeg='receber';go('financas')">Finanças</button></div><div class="grp">${late.map((c) => cRow(c, true)).join('')}</div>`;
     h += `<div class="gh"><h3>Lembretes</h3><button onclick="go('lembretes')">Ver todos</button></div><div class="grp">${overdue.map(remRow).join('')}${rs.map(remRow).join('') || (overdue.length ? '' : '<div class="empty">Nada pra hoje.</div>')}</div>`;
     h += `<div class="gh"><h3>Agenda</h3><button onclick="aDay=T().iso;go('agenda')">Semana</button></div><div class="grp">${ev.map(evRow).join('') || '<div class="empty">Nada marcado.</div>'}</div>`;
-    h += `<div class="gh"><h3>Caixa de ${MESES[t.d.getMonth()]}</h3></div><div class="grp">${cell({ on: "finSeg='resumo';fMonth=T().mes;go('financas')", t: 'Sobrou até agora', s: `Entrou ${fmt(inc)}, saiu ${fmt(out)}`, r: fmt(inc - out), rc: inc - out >= 0 ? 'green' : 'red' })}</div>`;
+    if (!HIDE) h += `<div class="gh"><h3>Caixa de ${MESES[t.d.getMonth()]}</h3></div><div class="grp">${cell({ on: "finSeg='resumo';fMonth=T().mes;go('financas')", t: 'Sobrou até agora', s: `Entrou ${fmt(inc)}, saiu ${fmt(out)}`, r: fmt(inc - out), rc: inc - out >= 0 ? 'green' : 'red' })}</div>`;
   }
   if (tab === 'clientes') {
     h = navrow('newClient()', 'Novo cliente') + `<h1 class="lt">Clientes</h1><label class="search">${SV.search}<input placeholder="Buscar" value="${esc(cQuery)}" oninput="cQuery=this.value;drawCList()"></label>` +
-      `<div class="segc">${[['todos', 'Todos'], ['pend', 'Falta post'], ['late', 'Não pagou']].map((s) => `<button class="${cFilter === s[0] ? 'on' : ''}" onclick="cFilter='${s[0]}';render()">${s[1]} (${S.clients.filter(FILT[s[0]]).length})</button>`).join('')}</div>` +
+      `<div class="segc">${[['todos', 'Todos'], ['pend', 'Falta post']].concat(HIDE ? [] : [['late', 'Não pagou']]).map((s) => `<button class="${cFilter === s[0] ? 'on' : ''}" onclick="cFilter='${s[0]}';render()">${s[1]} (${S.clients.filter(FILT[s[0]]).length})</button>`).join('')}</div>` +
       `<div style="height:14px"></div><div class="grp" id="clist"></div>`;
   }
   if (tab === 'lembretes') {
@@ -333,7 +333,7 @@ function openBoard() {
   fromBoard = true; const okN = S.clients.filter(ok).length, m = parse(T().ws), e = addDays(m, 6);
   openSheet(sbar(['Fechar'], `Semana de ${m.getDate()} a ${e.getDate()}`) + `<p class="cap" style="padding:0 16px 12px;text-align:center">${okN} em dia, ${S.clients.length - okN} com post faltando</p><div class="board">${S.clients.map((c) => {
     const w = weekPosts(c); let b = ''; for (let i = 0; i < w.done; i++) b += '<i class="d"></i>'; for (let i = 0; i < w.sched; i++) b += '<i class="s"></i>'; for (let i = 0; i < pend(c); i++) b += '<i></i>';
-    return `<button class="tile" onclick="openClient(${c.id},1)"><span class="tn">${esc(c.name)}</span><span class="ring">${b}</span><span class="st" style="color:var(--${ok(c) ? 'green' : 'orange'})">${ok(c) ? 'Em dia' : 'Falta ' + pend(c)}</span>${adiantado(c) ? `<span class="st" style="color:var(--green);margin-top:1px">+${adiantado(c)} adiantado${adiantado(c) > 1 ? 's' : ''}</span>` : (!ok(c) && !flow(c).prontos ? '<span class="st" style="color:var(--sec);margin-top:1px">sem estoque</span>' : '')}${isLate(c) ? '<span class="st" style="color:var(--red);margin-top:1px">Não pagou</span>' : ''}</button>`;
+    return `<button class="tile" onclick="openClient(${c.id},1)"><span class="tn">${esc(c.name)}</span><span class="ring">${b}</span><span class="st" style="color:var(--${ok(c) ? 'green' : 'orange'})">${ok(c) ? 'Em dia' : 'Falta ' + pend(c)}</span>${adiantado(c) ? `<span class="st" style="color:var(--green);margin-top:1px">+${adiantado(c)} adiantado${adiantado(c) > 1 ? 's' : ''}</span>` : (!ok(c) && !flow(c).prontos ? '<span class="st" style="color:var(--sec);margin-top:1px">sem estoque</span>' : '')}${isLate(c) && !HIDE ? '<span class="st" style="color:var(--red);margin-top:1px">Não pagou</span>' : ''}</button>`;
   }).join('')}</div><p class="cap" style="text-align:center">Barra cheia: postado. Clara: agendado. Cinza: falta.</p>`);
 }
 
@@ -364,7 +364,7 @@ function openClient(id, fb) {
     `<div class="step"><h3><em style="background:var(--orange)">2</em>Edição</h3><small>${F.praEditar ? F.praEditar + ' pra editar' : 'tudo editado'}</small></div><div class="grp"><div class="slots">${se || '<span class="cap" style="padding:0">Nada gravado pra editar.</span>'}</div><div style="padding:10px 16px 16px"><button class="btn orange" style="margin:0;width:100%" onclick="markEdit(${id})">${SV.pen}Vídeo editado</button></div></div>` +
     `<div class="step"><h3><em style="background:var(--tint)">3</em>Postagem</h3><small>${w.done + w.sched} de ${c.meta}</small></div><div class="grp"><div class="slots">${sl}</div><p class="cap" style="padding:2px 16px 4px">${pd ? `Falta ${pd} pra fechar a semana.${F.prontos ? ' ' + Math.min(F.prontos, pd) + ' já pronto' + (Math.min(F.prontos, pd) > 1 ? 's' : '') + '.' : ''}` : 'Semana fechada!'}</p><div style="padding:6px 16px 4px"><button class="btn" style="margin:0;width:100%" onclick="markPost(${id},'postado')">${SV.playS}Postar</button></div><button class="small-link" onclick="markPost(${id},'agendado')">Marcar como programado</button></div>` +
     '<p class="cap">Marcou errado? Toque no quadrado pra desfazer.</p>' +
-    `<div class="gh"><h3>Pagamento de ${MESES[t.d.getMonth()]}</h3></div><div class="grp">${cell({ t: 'Mensalidade', r: fmt(c.valor) })}${cell({ t: 'Vencimento', r: 'Todo dia ' + c.venc })}${cell({ t: 'Situação', r: p.long, rc: p.k })}</div>` +
+    `<div class="gh"><h3>Pagamento de ${MESES[t.d.getMonth()]}</h3></div><div class="grp">${cell({ t: 'Mensalidade', r: fmt(c.valor) })}${cell({ t: 'Vencimento', r: 'Todo dia ' + c.venc })}${cell({ t: 'Situação', r: HIDE ? '•••' : p.long, rc: HIDE ? '' : p.k })}</div>` +
     (paidTx(c) ? `<button class="btn gray" onclick="unpay(${id})">Desfazer pagamento</button>` : `<div class="row2"><button class="btn gray" onclick="cobrar(${id})">${c.phone ? 'Cobrar no WhatsApp' : 'Copiar cobrança'}</button><button class="btn green" onclick="receive(${id})">Recebi</button></div>`) +
     `<div class="gh"><h3>Horários fixos</h3><button onclick="newEvent(${id})">Adicionar</button></div><div class="grp">${sch.map((x) => cell({ on: `openEvent('sch',${x.id})`, t: esc(x.titulo), s: `Toda ${WD[x.weekday]}, ${hm(x.hora)}` })).join('') || '<div class="empty">Nenhum horário fixo.</div>'}</div>` +
     `<button class="btn gray" onclick="newReminder('',${id})">Criar lembrete pra esse cliente</button>` +
@@ -698,8 +698,8 @@ async function testPush() {
 }
 
 function toggleHide() {
-  HIDE = !HIDE; try { localStorage.setItem('im_hide', HIDE ? '1' : '0'); } catch (e) { }
-  render(); banner(HIDE ? 'Valores escondidos' : 'Valores visíveis', HIDE ? 'Pode gravar a tela tranquila.' : '');
+  HIDE = !HIDE; if (HIDE && cFilter === 'late') cFilter = 'todos'; try { localStorage.setItem('im_hide', HIDE ? '1' : '0'); } catch (e) { }
+  render(); banner(HIDE ? 'Valores escondidos' : 'Valores visíveis', HIDE ? 'Dinheiro e pagamentos escondidos.' : '');
 }
 /* ---------------- ajustes ---------------- */
 function setTheme(t) { theme = t; document.documentElement.setAttribute('data-theme', t); try { localStorage.setItem('im_theme', t); } catch (e) { } }
