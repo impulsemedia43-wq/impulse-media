@@ -69,14 +69,15 @@ const db = {
 };
 
 /* ---------------- estado ---------------- */
-const S = { clients: [], schedule: [], posts: [], events: [], reminders: [], bills: [], tx: [], toggles: { daily: true, rem: true, late: true, bills: true, agenda: true, week: true } };
+const S = { clients: [], schedule: [], posts: [], edits: [], events: [], reminders: [], bills: [], tx: [], toggles: { daily: true, rem: true, late: true, bills: true, agenda: true, week: true } };
 async function loadAll() {
   const t = T();
   const [clients, schedule, posts, events, reminders, bills, tx, tg] = await Promise.all([
     db.list('clients'), db.list('client_schedule'), db.list('posts', ['week_start', 'gte', iso(addDays(parse(t.ws), -7))]),
     db.list('events', ['dia', 'gte', iso(addDays(t.d, -30))]), db.list('reminders'), db.list('bills'), db.list('transactions'), db.getSettings()
   ]);
-  Object.assign(S, { clients, schedule, posts, events, reminders, bills, tx });
+  let edits = []; try { edits = await db.list('edits', ['week_start', 'gte', t.ws]); } catch (e) { console.warn('tabela edits ainda não existe'); }
+  Object.assign(S, { clients, schedule, posts, edits, events, reminders, bills, tx });
   S.clients.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
   if (tg) S.toggles = { ...S.toggles, ...tg };
 }
@@ -87,6 +88,7 @@ async function act(fn, okMsg) {
 
 /* ---------------- regras ---------------- */
 const client = (id) => S.clients.find((c) => c.id === id);
+function weekEdits(c) { const ws = T().ws; return S.edits.filter((x) => x.client_id === c.id && x.week_start === ws); }
 function weekPosts(c) { const ws = T().ws; const l = S.posts.filter((p) => p.client_id === c.id && p.week_start === ws); return { done: l.filter((p) => p.status === 'postado').length, sched: l.filter((p) => p.status === 'agendado').length, list: l }; }
 const pend = (c) => { const w = weekPosts(c); return Math.max(0, c.meta - w.done - w.sched); };
 const ok = (c) => pend(c) === 0;
@@ -131,6 +133,9 @@ const SV = {
   check: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
   search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>',
   play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l10.5-6.5z"/></svg>',
+  pen: '<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-4px;margin-right:7px"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M14 6l4 4"/></svg>',
+  penB: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>',
+  playS: '<svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor" style="vertical-align:-4px;margin-right:7px"><path d="M8 5.5v13l10.5-6.5z"/></svg>',
   clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>'
 };
 const TABI = {
@@ -306,7 +311,7 @@ function openBoard() {
   fromBoard = true; const okN = S.clients.filter(ok).length, m = parse(T().ws), e = addDays(m, 6);
   openSheet(sbar(['Fechar'], `Semana de ${m.getDate()} a ${e.getDate()}`) + `<p class="cap" style="padding:0 16px 12px;text-align:center">${okN} em dia, ${S.clients.length - okN} com post faltando</p><div class="board">${S.clients.map((c) => {
     const w = weekPosts(c); let b = ''; for (let i = 0; i < w.done; i++) b += '<i class="d"></i>'; for (let i = 0; i < w.sched; i++) b += '<i class="s"></i>'; for (let i = 0; i < pend(c); i++) b += '<i></i>';
-    return `<button class="tile" onclick="openClient(${c.id},1)"><span class="tn">${esc(c.name)}</span><span class="ring">${b}</span><span class="st" style="color:var(--${ok(c) ? 'green' : 'orange'})">${ok(c) ? 'Em dia' : 'Falta ' + pend(c)}</span>${isLate(c) ? '<span class="st" style="color:var(--red);margin-top:1px">Não pagou</span>' : ''}</button>`;
+    return `<button class="tile" onclick="openClient(${c.id},1)"><span class="tn">${esc(c.name)}</span><span class="ring">${b}</span><span class="st" style="color:var(--${ok(c) ? 'green' : 'orange'})">${ok(c) ? 'Em dia' : 'Falta ' + pend(c)}</span>${!ok(c) && weekEdits(c).length ? `<span class="st" style="color:var(--sec);margin-top:1px">${weekEdits(c).length} editado${weekEdits(c).length > 1 ? 's' : ''}</span>` : ''}${isLate(c) ? '<span class="st" style="color:var(--red);margin-top:1px">Não pagou</span>' : ''}</button>`;
   }).join('')}</div><p class="cap" style="text-align:center">Barra cheia: postado. Clara: agendado. Cinza: falta.</p>`);
 }
 
@@ -318,11 +323,15 @@ function openClient(id, fb) {
   for (let i = 0; i < w.done; i++) sl += `<button class="slot d" onclick="undoPost(${id},'postado')">${SV.play}Postado</button>`;
   for (let i = 0; i < w.sched; i++) sl += `<button class="slot s" onclick="undoPost(${id},'agendado')">${SV.clock}Agendado</button>`;
   for (let i = 0; i < pd; i++) sl += '<span class="slot e">Falta</span>';
+  const ed = weekEdits(c), fe = Math.max(0, c.meta - ed.length); let se = '';
+  for (let i = 0; i < ed.length; i++) se += `<button class="slot ed" onclick="undoEdit(${id})">${SV.penB}Editado</button>`;
+  for (let i = 0; i < fe; i++) se += '<span class="slot e">Falta</span>';
   const sch = S.schedule.filter((x) => x.client_id === id).sort((a, b) => a.weekday - b.weekday || byHora(a, b));
   openSheet(sbar([fromBoard ? '‹ Semana' : 'Fechar', fromBoard ? 'openBoard()' : 'closeSheet()'], '', ['Editar', `editClient(${id})`]) +
     `<div class="hero"><div class="ini">${esc(ini(c.name))}</div><h2>${esc(c.name)}</h2><p>${c.ig ? '@' + esc(c.ig) : ''}</p></div>` +
-    `<div class="gh"><h3>Esta semana <small>${w.done + w.sched} de ${c.meta} ${esc(c.tipo)}</small></h3></div><div class="grp"><div class="slots">${sl}</div><p class="cap" style="padding:2px 16px 14px">${pd ? `Falta ${pd} pra fechar a semana.` : 'Semana fechada.'}${w.done + w.sched ? ' Toque num quadrado pra desfazer.' : ''}</p></div>` +
-    `<div class="row2"><button class="btn" onclick="markPost(${id},'postado')">Postei</button><button class="btn gray" onclick="markPost(${id},'agendado')">Agendei</button></div>` +
+    `<div class="gh"><h3>Edição <small>${ed.length} de ${c.meta} ${esc(c.tipo)}</small></h3></div><div class="grp"><div class="slots">${se}</div><p class="cap" style="padding:2px 16px 4px">${fe ? `Falta ${fe} pra editar.` : 'Tudo editado.'}</p><div style="padding:6px 16px 16px"><button class="btn orange" style="margin:0;width:100%" onclick="markEdit(${id})">${SV.pen}Vídeo editado</button></div></div>` +
+    `<div class="gh"><h3>Postagem <small>${w.done + w.sched} de ${c.meta} ${esc(c.tipo)}</small></h3></div><div class="grp"><div class="slots">${sl}</div><p class="cap" style="padding:2px 16px 4px">${pd ? `Falta ${pd} pra fechar a semana.` : 'Semana fechada.'}</p><div style="padding:6px 16px 4px"><button class="btn" style="margin:0;width:100%" onclick="markPost(${id},'postado')">${SV.playS}Postar</button></div><button class="small-link" onclick="markPost(${id},'agendado')">Marcar como agendado</button></div>` +
+    (w.done + w.sched + ed.length ? '<p class="cap">Marcou errado? Toque no quadrado pra desfazer.</p>' : '') +
     `<div class="gh"><h3>Pagamento de ${MESES[T().d.getMonth()]}</h3></div><div class="grp">${cell({ t: 'Mensalidade', r: fmt(c.valor) })}${cell({ t: 'Vencimento', r: 'Todo dia ' + c.venc })}${cell({ t: 'Situação', r: p.long, rc: p.k })}</div>` +
     (paidTx(c) ? `<button class="btn gray" onclick="unpay(${id})">Desfazer pagamento</button>` : `<div class="row2"><button class="btn gray" onclick="cobrar(${id})">${c.phone ? 'Cobrar no WhatsApp' : 'Copiar cobrança'}</button><button class="btn green" onclick="receive(${id})">Recebi</button></div>`) +
     `<div class="gh"><h3>Horários fixos</h3><button onclick="newEvent(${id})">Adicionar</button></div><div class="grp">${sch.map((x) => cell({ on: `openEvent('sch',${x.id})`, t: esc(x.titulo), s: `Toda ${WD[x.weekday]}, ${hm(x.hora)}` })).join('') || '<div class="empty">Nenhum horário fixo.</div>'}</div>` +
@@ -332,6 +341,18 @@ async function markPost(id, status) {
   const c = client(id); if (!pend(c)) { banner('Semana já fechada', c.name + ' já bateu a meta.'); return; }
   const ok2 = await act(async () => { S.posts.push(await db.insert('posts', { client_id: id, week_start: T().ws, status })); });
   if (ok2) { openClient(id, fromBoard); banner(ok(c) ? c.name + ' fechou a semana' : (status === 'postado' ? 'Post marcado' : 'Agendado marcado'), ok(c) ? 'Meta completa.' : 'Falta ' + pend(c) + ' pra fechar.'); }
+}
+async function markEdit(id) {
+  const c = client(id);
+  if (weekEdits(c).length >= c.meta) { banner('Edição completa', 'Todos os vídeos da semana já estão editados.'); return; }
+  try { S.edits.push(await db.insert('edits', { client_id: id, week_start: T().ws })); }
+  catch (e) { console.error(e); banner('Falta ativar a edição', 'Rode o arquivo supabase/edicao.sql no Supabase.'); return; }
+  render(); openClient(id, fromBoard); const f = c.meta - weekEdits(c).length;
+  banner('Vídeo editado', f ? `Falta ${f} pra editar.` : 'Edição da semana completa.');
+}
+async function undoEdit(id) {
+  const l = weekEdits(client(id)); if (!l.length) return; const last = l[l.length - 1];
+  if (await act(async () => { await db.remove('edits', last.id); S.edits = S.edits.filter((x) => x.id !== last.id); })) openClient(id, fromBoard);
 }
 async function undoPost(id, status) {
   const l = weekPosts(client(id)).list.filter((p) => p.status === status); if (!l.length) return;
@@ -381,7 +402,7 @@ function editClient(id) { openSheet(sbar(['Cancelar', `openClient(${id})`], 'Edi
 function askDelClient(id) { confirmSheet('Apagar ' + esc(client(id).name) + '?', 'Some também os posts e horários dele. Os pagamentos já recebidos continuam nas Finanças.', 'Apagar cliente', `delClient(${id})`, `editClient(${id})`); }
 async function delClient(id) {
   const n = client(id).name;
-  if (await act(async () => { await db.remove('clients', id); S.clients = S.clients.filter((c) => c.id !== id); S.schedule = S.schedule.filter((x) => x.client_id !== id); S.posts = S.posts.filter((x) => x.client_id !== id); S.events = S.events.filter((x) => x.client_id !== id); S.tx.forEach((x) => { if (x.client_id === id) x.client_id = null; }); }, ['Cliente apagado', n])) closeSheet();
+  if (await act(async () => { await db.remove('clients', id); S.clients = S.clients.filter((c) => c.id !== id); S.schedule = S.schedule.filter((x) => x.client_id !== id); S.posts = S.posts.filter((x) => x.client_id !== id); S.edits = S.edits.filter((x) => x.client_id !== id); S.events = S.events.filter((x) => x.client_id !== id); S.tx.forEach((x) => { if (x.client_id === id) x.client_id = null; }); }, ['Cliente apagado', n])) closeSheet();
 }
 
 /* lembretes */
@@ -650,7 +671,7 @@ function demoData() {
   tx.push({ id: tid++, tipo: 'saida', titulo: 'Canva Pro', cat: 'Ferramentas', valor: 34.9, data: dd(1), bill_id: 1, ref_mes: mes });
   for (let m = 1; m <= 5; m++) { const mk = addMonths(mes, -m), d = mk.slice(0, 8) + '10'; tx.push({ id: tid++, tipo: 'entrada', titulo: 'Mensalidades', cat: 'Mensalidade', valor: 5200 - m * 300, data: d }); tx.push({ id: tid++, tipo: 'saida', titulo: 'Gastos do mês', cat: 'Outros', valor: 900 + (m % 3) * 250, data: d }); }
   return {
-    clients, posts,
+    clients, posts, edits: [{ id: 1, client_id: 1, week_start: ws }, { id: 2, client_id: 3, week_start: ws }, { id: 3, client_id: 3, week_start: ws }],
     client_schedule: [{ id: 1, client_id: 1, weekday: 3, hora: '09:00', titulo: 'Gravação dos vídeos' }, { id: 2, client_id: 2, weekday: 1, hora: '14:00', titulo: 'Fotos da semana' }, { id: 3, client_id: 6, weekday: t.wd, hora: '17:00', titulo: 'Gravação de treino' }],
     events: [],
     reminders: [{ id: 1, titulo: 'Postar vídeo da Rede Pop', client_id: 1, repetir: 'nunca', dia: iso(addDays(t.d, 1)), hora: '09:00', feito: false }, { id: 2, titulo: 'Mandar roteiro pra Clínica Sorriso', client_id: 5, repetir: 'nunca', dia: t.iso, hora: '14:00', feito: false }, { id: 3, titulo: 'Stories da Bella Estética', client_id: 2, repetir: 'dia', hora: '10:00', feito: false }, { id: 4, titulo: 'Planejar conteúdo da semana', client_id: null, repetir: 'semana', weekday: 1, hora: '08:00', feito: false }],
@@ -660,7 +681,7 @@ function demoData() {
 }
 
 /* expõe as funções usadas nos botões */
-Object.assign(window, { newPasswordSheet, go, render, drawCList, openBoard, openClient, markPost, undoPost, receive, unpay, cobrar, newClient, saveClient, editClient, askDelClient, delClient, toggleRem, openRem, delRem, newReminder, remRepChange, saveRem, openEvent, delEvent, newEvent, saveEv, pickCat, newTx, openTx, saveTx, delTx, newBill, openBill, saveBill, toggleBill, delBill, openNotifs, openSettings, setTheme, setToggle, enablePush, testPush, closeSheet, doLogin, forgot, savePassword, logout, T, iso, parse, addDays, addMonths, monthKey });
+Object.assign(window, { newPasswordSheet, markEdit, undoEdit, go, render, drawCList, openBoard, openClient, markPost, undoPost, receive, unpay, cobrar, newClient, saveClient, editClient, askDelClient, delClient, toggleRem, openRem, delRem, newReminder, remRepChange, saveRem, openEvent, delEvent, newEvent, saveEv, pickCat, newTx, openTx, saveTx, delTx, newBill, openBill, saveBill, toggleBill, delBill, openNotifs, openSettings, setTheme, setToggle, enablePush, testPush, closeSheet, doLogin, forgot, savePassword, logout, T, iso, parse, addDays, addMonths, monthKey });
 Object.defineProperty(window, 'cFilter', { get: () => cFilter, set: (v) => { cFilter = v; } });
 Object.defineProperty(window, 'cQuery', { get: () => cQuery, set: (v) => { cQuery = v; } });
 Object.defineProperty(window, 'aDay', { get: () => aDay, set: (v) => { aDay = v; } });
