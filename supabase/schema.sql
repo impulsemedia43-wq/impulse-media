@@ -47,6 +47,17 @@ create table if not exists edits (
   created_at  timestamptz default now()
 );
 
+-- gravações feitas em cada visita
+create table if not exists visits (
+  id          bigint generated always as identity primary key,
+  owner       uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  client_id   bigint not null references clients(id) on delete cascade,
+  dia         date not null default current_date,
+  qtd         int  not null default 1 check (qtd > 0),
+  obs         text default '',
+  created_at  timestamptz default now()
+);
+
 -- compromissos de um dia só
 create table if not exists events (
   id          bigint generated always as identity primary key,
@@ -243,7 +254,7 @@ create table if not exists notifications_sent (  -- evita mandar o mesmo aviso 2
 do $$
 declare t text;
 begin
-  foreach t in array array['clients','client_schedule','posts','edits','events','reminders','bills','transactions','push_subscriptions','settings']
+  foreach t in array array['clients','client_schedule','posts','edits','visits','events','reminders','bills','transactions','push_subscriptions','settings']
   loop
     execute format('alter table %I enable row level security', t);
     execute format('drop policy if exists "dono" on %I', t);
@@ -256,7 +267,7 @@ alter table app_keys enable row level security;           -- idem
 do $$
 declare t text;
 begin
-  foreach t in array array['clients','client_schedule','posts','edits','events','reminders','bills','transactions','push_subscriptions','settings']
+  foreach t in array array['clients','client_schedule','posts','edits','visits','events','reminders','bills','transactions','push_subscriptions','settings']
   loop
     execute format('alter table %I enable row level security', t);
     execute format('drop policy if exists "dono" on %I', t);

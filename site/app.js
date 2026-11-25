@@ -69,15 +69,17 @@ const db = {
 };
 
 /* ---------------- estado ---------------- */
-const S = { clients: [], schedule: [], posts: [], edits: [], events: [], reminders: [], bills: [], tx: [], toggles: { daily: true, rem: true, late: true, bills: true, agenda: true, week: true } };
+const S = { clients: [], schedule: [], posts: [], edits: [], visits: [], events: [], reminders: [], bills: [], tx: [], toggles: { daily: true, rem: true, late: true, bills: true, agenda: true, week: true } };
 async function loadAll() {
   const t = T();
   const [clients, schedule, posts, events, reminders, bills, tx, tg] = await Promise.all([
-    db.list('clients'), db.list('client_schedule'), db.list('posts', ['week_start', 'gte', iso(addDays(parse(t.ws), -7))]),
+    db.list('clients'), db.list('client_schedule'), db.list('posts', ['week_start', 'gte', iso(addDays(t.d, -200))]),
     db.list('events', ['dia', 'gte', iso(addDays(t.d, -30))]), db.list('reminders'), db.list('bills'), db.list('transactions'), db.getSettings()
   ]);
-  let edits = []; try { edits = await db.list('edits', ['week_start', 'gte', t.ws]); } catch (e) { console.warn('tabela edits ainda não existe'); }
-  Object.assign(S, { clients, schedule, posts, edits, events, reminders, bills, tx });
+  let edits = [], visits = [];
+  try { edits = await db.list('edits', ['week_start', 'gte', iso(addDays(t.d, -200))]); } catch (e) { console.warn('tabela edits ainda não existe'); }
+  try { visits = await db.list('visits', ['dia', 'gte', iso(addDays(t.d, -200))]); } catch (e) { console.warn('tabela visits ainda não existe'); }
+  Object.assign(S, { clients, schedule, posts, edits, visits, events, reminders, bills, tx });
   S.clients.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
   if (tg) S.toggles = { ...S.toggles, ...tg };
 }
@@ -88,6 +90,17 @@ async function act(fn, okMsg) {
 
 /* ---------------- regras ---------------- */
 const client = (id) => S.clients.find((c) => c.id === id);
+const FLOW_START = '2026-11-23'; // começo do controle de gravação/estoque
+const sumQ = (l) => l.reduce((s, x) => s + (Number(x.qtd) || 0), 0);
+function flow(c, upto) { // números acumulados desde FLOW_START até a semana "upto" (inclusive)
+  upto = upto || T().ws;
+  const g = sumQ(S.visits.filter((x) => x.client_id === c.id && x.dia >= FLOW_START && iso(mondayOf(parse(x.dia))) <= upto));
+  const e = S.edits.filter((x) => x.client_id === c.id && x.week_start >= FLOW_START && x.week_start <= upto).length;
+  const p = S.posts.filter((x) => x.client_id === c.id && x.week_start >= FLOW_START && x.week_start <= upto).length;
+  return { g, e, p, praEditar: Math.max(0, g - e), prontos: Math.max(0, e - p) };
+}
+function weekVisits(c) { const ws = T().ws; return S.visits.filter((x) => x.client_id === c.id && iso(mondayOf(parse(x.dia))) === ws).sort((a, b) => (a.dia < b.dia ? -1 : 1)); }
+function adiantado(c) { return Math.max(0, flow(c).prontos - pend(c)); }
 function weekEdits(c) { const ws = T().ws; return S.edits.filter((x) => x.client_id === c.id && x.week_start === ws); }
 function weekPosts(c) { const ws = T().ws; const l = S.posts.filter((p) => p.client_id === c.id && p.week_start === ws); return { done: l.filter((p) => p.status === 'postado').length, sched: l.filter((p) => p.status === 'agendado').length, list: l }; }
 const pend = (c) => { const w = weekPosts(c); return Math.max(0, c.meta - w.done - w.sched); };
@@ -136,6 +149,10 @@ const SV = {
   pen: '<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-4px;margin-right:7px"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M14 6l4 4"/></svg>',
   penB: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>',
   playS: '<svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor" style="vertical-align:-4px;margin-right:7px"><path d="M8 5.5v13l10.5-6.5z"/></svg>',
+  playO: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" style="display:block;margin:0 auto 2px"><path d="M8 5.5v13l10.5-6.5z"/></svg>',
+  cam: '<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-4px;margin-right:7px"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3"/></svg>',
+  doc: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14H6zM9 12h7M9 16h7M9 8h3"/></svg>',
+  docW: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14H6zM9 12h7M9 16h7M9 8h3"/></svg><span>Gerar PDF e enviar</span>',
   clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>'
 };
 const TABI = {
@@ -311,7 +328,7 @@ function openBoard() {
   fromBoard = true; const okN = S.clients.filter(ok).length, m = parse(T().ws), e = addDays(m, 6);
   openSheet(sbar(['Fechar'], `Semana de ${m.getDate()} a ${e.getDate()}`) + `<p class="cap" style="padding:0 16px 12px;text-align:center">${okN} em dia, ${S.clients.length - okN} com post faltando</p><div class="board">${S.clients.map((c) => {
     const w = weekPosts(c); let b = ''; for (let i = 0; i < w.done; i++) b += '<i class="d"></i>'; for (let i = 0; i < w.sched; i++) b += '<i class="s"></i>'; for (let i = 0; i < pend(c); i++) b += '<i></i>';
-    return `<button class="tile" onclick="openClient(${c.id},1)"><span class="tn">${esc(c.name)}</span><span class="ring">${b}</span><span class="st" style="color:var(--${ok(c) ? 'green' : 'orange'})">${ok(c) ? 'Em dia' : 'Falta ' + pend(c)}</span>${!ok(c) && weekEdits(c).length ? `<span class="st" style="color:var(--sec);margin-top:1px">${weekEdits(c).length} editado${weekEdits(c).length > 1 ? 's' : ''}</span>` : ''}${isLate(c) ? '<span class="st" style="color:var(--red);margin-top:1px">Não pagou</span>' : ''}</button>`;
+    return `<button class="tile" onclick="openClient(${c.id},1)"><span class="tn">${esc(c.name)}</span><span class="ring">${b}</span><span class="st" style="color:var(--${ok(c) ? 'green' : 'orange'})">${ok(c) ? 'Em dia' : 'Falta ' + pend(c)}</span>${adiantado(c) ? `<span class="st" style="color:var(--green);margin-top:1px">+${adiantado(c)} adiantado${adiantado(c) > 1 ? 's' : ''}</span>` : (!ok(c) && !flow(c).prontos ? '<span class="st" style="color:var(--sec);margin-top:1px">sem estoque</span>' : '')}${isLate(c) ? '<span class="st" style="color:var(--red);margin-top:1px">Não pagou</span>' : ''}</button>`;
   }).join('')}</div><p class="cap" style="text-align:center">Barra cheia: postado. Clara: agendado. Cinza: falta.</p>`);
 }
 
@@ -319,23 +336,34 @@ function openBoard() {
 function openClient(id, fb) {
   if (fb !== undefined) fromBoard = !!fb; else fromBoard = false;
   const c = client(id); if (!c) { closeSheet(); return; }
-  const p = pay(c), w = weekPosts(c), pd = pend(c); let sl = '';
+  const t = T(), p = pay(c), w = weekPosts(c), pd = pend(c), F = flow(c), Fp = flow(c, iso(addDays(parse(t.ws), -7)));
+  const wv = weekVisits(c), wg = sumQ(wv), we = weekEdits(c), old = Math.min(F.prontos, Fp.prontos);
+  const big = (svg) => svg.replace('<svg', '<svg width="22" height="22" style="display:block;margin:0 auto 2px"');
+  let se = '', sl = '';
+  we.forEach(() => { se += `<button class="slot ed" onclick="undoEdit(${id})">${SV.penB}Editado</button>`; });
+  for (let i = 0; i < F.praEditar; i++) se += '<span class="slot e">Editar</span>';
   for (let i = 0; i < w.done; i++) sl += `<button class="slot d" onclick="undoPost(${id},'postado')">${SV.play}Postado</button>`;
-  for (let i = 0; i < w.sched; i++) sl += `<button class="slot s" onclick="undoPost(${id},'agendado')">${SV.clock}Agendado</button>`;
-  for (let i = 0; i < pd; i++) sl += '<span class="slot e">Falta</span>';
-  const ed = weekEdits(c), fe = Math.max(0, c.meta - ed.length); let se = '';
-  for (let i = 0; i < ed.length; i++) se += `<button class="slot ed" onclick="undoEdit(${id})">${SV.penB}Editado</button>`;
-  for (let i = 0; i < fe; i++) se += '<span class="slot e">Falta</span>';
+  for (let i = 0; i < w.sched; i++) sl += `<button class="slot s" onclick="undoPost(${id},'agendado')">${SV.clock}Programado</button>`;
+  for (let i = 0; i < pd; i++) sl += i < F.prontos ? `<span class="slot pr">${SV.playO}Pronto</span>` : '<span class="slot e">Falta</span>';
+  const stock = F.prontos
+    ? `<b>${F.prontos} vídeo${F.prontos > 1 ? 's' : ''} pronto${F.prontos > 1 ? 's' : ''} pra postar</b><span>${old ? old + ' da semana passada · ' : ''}${F.prontos > pd ? '+' + (F.prontos - pd) + ' adiantado' + (F.prontos - pd > 1 ? 's' : '') + ' pra próxima semana' : 'usa nesta semana'}</span>`
+    : `<b>Nenhum vídeo pronto</b><span>${F.praEditar ? F.praEditar + ' gravado' + (F.praEditar > 1 ? 's' : '') + ' esperando edição' : 'Grave e edite pra encher o estoque'}</span>`;
   const sch = S.schedule.filter((x) => x.client_id === id).sort((a, b) => a.weekday - b.weekday || byHora(a, b));
+  const m = parse(t.ws), e = addDays(m, 6);
   openSheet(sbar([fromBoard ? '‹ Semana' : 'Fechar', fromBoard ? 'openBoard()' : 'closeSheet()'], '', ['Editar', `editClient(${id})`]) +
-    `<div class="hero"><div class="ini">${esc(ini(c.name))}</div><h2>${esc(c.name)}</h2><p>${c.ig ? '@' + esc(c.ig) : ''}</p></div>` +
-    `<div class="gh"><h3>Edição <small>${ed.length} de ${c.meta} ${esc(c.tipo)}</small></h3></div><div class="grp"><div class="slots">${se}</div><p class="cap" style="padding:2px 16px 4px">${fe ? `Falta ${fe} pra editar.` : 'Tudo editado.'}</p><div style="padding:6px 16px 16px"><button class="btn orange" style="margin:0;width:100%" onclick="markEdit(${id})">${SV.pen}Vídeo editado</button></div></div>` +
-    `<div class="gh"><h3>Postagem <small>${w.done + w.sched} de ${c.meta} ${esc(c.tipo)}</small></h3></div><div class="grp"><div class="slots">${sl}</div><p class="cap" style="padding:2px 16px 4px">${pd ? `Falta ${pd} pra fechar a semana.` : 'Semana fechada.'}</p><div style="padding:6px 16px 4px"><button class="btn" style="margin:0;width:100%" onclick="markPost(${id},'postado')">${SV.playS}Postar</button></div><button class="small-link" onclick="markPost(${id},'agendado')">Marcar como agendado</button></div>` +
-    (w.done + w.sched + ed.length ? '<p class="cap">Marcou errado? Toque no quadrado pra desfazer.</p>' : '') +
-    `<div class="gh"><h3>Pagamento de ${MESES[T().d.getMonth()]}</h3></div><div class="grp">${cell({ t: 'Mensalidade', r: fmt(c.valor) })}${cell({ t: 'Vencimento', r: 'Todo dia ' + c.venc })}${cell({ t: 'Situação', r: p.long, rc: p.k })}</div>` +
+    `<div class="hero"><div class="ini">${esc(ini(c.name))}</div><h2>${esc(c.name)}</h2><p>${c.ig ? '@' + esc(c.ig) + ' · ' : ''}meta ${c.meta} por semana</p></div>` +
+    `<p class="cap" style="text-align:center;padding-top:10px">Semana de ${m.getDate()}/${pad(m.getMonth() + 1)} a ${e.getDate()}/${pad(e.getMonth() + 1)}</p>` +
+    `<div class="funnel"><div><b>${wg}</b><span>gravados</span></div><i>›</i><div><b>${we.length}</b><span>editados</span></div><i>›</i><div><b>${w.done + w.sched}</b><span>postados</span></div></div>` +
+    `<div class="stock${F.prontos ? '' : ' zero'}"><div class="bx">${F.prontos}</div><div>${stock}</div></div>` +
+    `<div class="step"><h3><em style="background:#30B0C7">1</em>Gravação</h3><small>${wg} vídeo${wg !== 1 ? 's' : ''}</small></div><div class="grp">${wv.map((x) => { const d = parse(x.dia); return `<button class="vis" onclick="openVisit(${x.id})"><div class="dt"><b>${d.getDate()}</b><span>${WD3[d.getDay()].toLowerCase()}</span></div><div class="tx"><b>${esc(x.obs || 'Gravação')}</b><p>${d.getDate()} de ${MESES[d.getMonth()]}</p></div><span class="n">${x.qtd} vídeo${x.qtd > 1 ? 's' : ''}</span></button>`; }).join('') || '<div class="empty">Nenhuma gravação nesta semana.</div>'}<div style="padding:10px 16px 16px"><button class="btn teal" style="margin:0;width:100%" onclick="newVisit(${id})">${SV.cam}Registrar gravação</button></div></div>` +
+    `<div class="step"><h3><em style="background:var(--orange)">2</em>Edição</h3><small>${F.praEditar ? F.praEditar + ' pra editar' : 'tudo editado'}</small></div><div class="grp"><div class="slots">${se || '<span class="cap" style="padding:0">Nada gravado pra editar.</span>'}</div><div style="padding:10px 16px 16px"><button class="btn orange" style="margin:0;width:100%" onclick="markEdit(${id})">${SV.pen}Vídeo editado</button></div></div>` +
+    `<div class="step"><h3><em style="background:var(--tint)">3</em>Postagem</h3><small>${w.done + w.sched} de ${c.meta}</small></div><div class="grp"><div class="slots">${sl}</div><p class="cap" style="padding:2px 16px 4px">${pd ? `Falta ${pd} pra fechar a semana.${F.prontos ? ' ' + Math.min(F.prontos, pd) + ' já pronto' + (Math.min(F.prontos, pd) > 1 ? 's' : '') + '.' : ''}` : 'Semana fechada!'}</p><div style="padding:6px 16px 4px"><button class="btn" style="margin:0;width:100%" onclick="markPost(${id},'postado')">${SV.playS}Postar</button></div><button class="small-link" onclick="markPost(${id},'agendado')">Marcar como programado</button></div>` +
+    '<p class="cap">Marcou errado? Toque no quadrado pra desfazer.</p>' +
+    `<div class="gh"><h3>Pagamento de ${MESES[t.d.getMonth()]}</h3></div><div class="grp">${cell({ t: 'Mensalidade', r: fmt(c.valor) })}${cell({ t: 'Vencimento', r: 'Todo dia ' + c.venc })}${cell({ t: 'Situação', r: p.long, rc: p.k })}</div>` +
     (paidTx(c) ? `<button class="btn gray" onclick="unpay(${id})">Desfazer pagamento</button>` : `<div class="row2"><button class="btn gray" onclick="cobrar(${id})">${c.phone ? 'Cobrar no WhatsApp' : 'Copiar cobrança'}</button><button class="btn green" onclick="receive(${id})">Recebi</button></div>`) +
     `<div class="gh"><h3>Horários fixos</h3><button onclick="newEvent(${id})">Adicionar</button></div><div class="grp">${sch.map((x) => cell({ on: `openEvent('sch',${x.id})`, t: esc(x.titulo), s: `Toda ${WD[x.weekday]}, ${hm(x.hora)}` })).join('') || '<div class="empty">Nenhum horário fixo.</div>'}</div>` +
-    `<button class="btn gray" onclick="newReminder('',${id})">Criar lembrete pra esse cliente</button>`);
+    `<button class="btn gray" onclick="newReminder('',${id})">Criar lembrete pra esse cliente</button>` +
+    `<div class="gh"><h3>Relatórios</h3></div><div class="grp">${cell({ on: `openReport(${id})`, left: `<span class="ico" style="background:#0E1A3D">${SV.doc}</span>`, t: 'Relatório do mês', s: 'Gravados, editados, postados e estoque' })}</div><div style="height:10px"></div>`);
 }
 async function markPost(id, status) {
   const c = client(id); if (!pend(c)) { banner('Semana já fechada', c.name + ' já bateu a meta.'); return; }
@@ -344,15 +372,98 @@ async function markPost(id, status) {
 }
 async function markEdit(id) {
   const c = client(id);
-  if (weekEdits(c).length >= c.meta) { banner('Edição completa', 'Todos os vídeos da semana já estão editados.'); return; }
+  if (!flow(c).praEditar) { banner('Nada pra editar', 'Registre a gravação primeiro.'); return; }
   try { S.edits.push(await db.insert('edits', { client_id: id, week_start: T().ws })); }
-  catch (e) { console.error(e); banner('Falta ativar a edição', 'Rode o arquivo supabase/edicao.sql no Supabase.'); return; }
-  render(); openClient(id, fromBoard); const f = c.meta - weekEdits(c).length;
-  banner('Vídeo editado', f ? `Falta ${f} pra editar.` : 'Edição da semana completa.');
+  catch (e) { console.error(e); banner('Falta ativar no banco', 'Rode o arquivo supabase/gravacoes.sql no Supabase.'); return; }
+  render(); openClient(id, fromBoard); const f = flow(c).praEditar;
+  banner('Vídeo editado', f ? `Falta editar ${f}.` : 'Tudo editado. Pronto pra postar.');
 }
 async function undoEdit(id) {
   const l = weekEdits(client(id)); if (!l.length) return; const last = l[l.length - 1];
   if (await act(async () => { await db.remove('edits', last.id); S.edits = S.edits.filter((x) => x.id !== last.id); })) openClient(id, fromBoard);
+}
+function newVisit(cid) {
+  openSheet(sbar(['Cancelar', `openClient(${cid},fromBoardFlag())`], 'Registrar gravação', ['Salvar', `saveVisit(${cid})`]) +
+    `<div class="grp" style="margin-top:6px"><div class="f"><label for="vd">Dia</label><input id="vd" type="date" value="${T().iso}" max="${T().iso}"></div><div class="f"><label for="vn">Vídeos gravados</label><input id="vn" type="number" inputmode="numeric" min="1" value="3"></div><div class="f"><input class="full" id="vo" placeholder="Observação (opcional)"></div></div>` +
+    '<p class="cap">Grave quantos quiser: o que passar da meta vira material adiantado pras próximas semanas.</p>');
+}
+const fromBoardFlag = () => (fromBoard ? 1 : 0);
+function saveVisit(cid) {
+  const qtd = Math.max(1, parseInt(val('vn')) || 0), dia = val('vd') || T().iso;
+  saving(async () => {
+    let ok2 = true;
+    try { S.visits.push(await db.insert('visits', { client_id: cid, dia, qtd, obs: val('vo') })); }
+    catch (e) { console.error(e); ok2 = false; banner('Falta ativar no banco', 'Rode o arquivo supabase/gravacoes.sql no Supabase.'); }
+    if (ok2) { render(); openClient(cid, fromBoard); banner('Gravação registrada', `${qtd} vídeo${qtd > 1 ? 's' : ''} gravado${qtd > 1 ? 's' : ''}.`); }
+    return ok2;
+  });
+}
+function openVisit(vid) {
+  const x = S.visits.find((v) => v.id === vid); if (!x) return; const d = parse(x.dia);
+  openSheet(sbar(['‹ Voltar', `openClient(${x.client_id},fromBoardFlag())`], 'Gravação') + `<div class="grp" style="margin-top:6px">${cell({ t: esc(x.obs || 'Gravação'), s: `${d.getDate()} de ${MESES[d.getMonth()]}`, r: x.qtd + ' vídeo' + (x.qtd > 1 ? 's' : '') })}</div><button class="btn gray danger" onclick="delVisit(${vid})">Apagar gravação</button>`);
+}
+async function delVisit(vid) {
+  const x = S.visits.find((v) => v.id === vid);
+  if (await act(async () => { await db.remove('visits', vid); S.visits = S.visits.filter((v) => v.id !== vid); }, ['Gravação apagada', ''])) openClient(x.client_id, fromBoard);
+}
+/* relatório mensal */
+let rMonth = T().mes;
+function monthData(c, mk) {
+  const inM = (d) => d && d.slice(0, 7) === mk.slice(0, 7);
+  const vis = S.visits.filter((x) => x.client_id === c.id && inM(x.dia)).sort((a, b) => (a.dia < b.dia ? -1 : 1));
+  const ed = S.edits.filter((x) => x.client_id === c.id && inM((x.created_at || x.week_start)));
+  const ps = S.posts.filter((x) => x.client_id === c.id && inM((x.created_at || x.week_start)));
+  const weeks = {}; ps.forEach((x) => { weeks[x.week_start] = (weeks[x.week_start] || 0) + 1; });
+  return { vis, g: sumQ(vis), e: ed.length, p: ps.length, weeks: Object.keys(weeks).sort().map((k) => [k, weeks[k]]), stock: mk === T().mes ? flow(c).prontos : 0 };
+}
+function wkLabel(ws) { const m = parse(ws), e = addDays(m, 6); return `Semana de ${m.getDate()}/${pad(m.getMonth() + 1)} a ${e.getDate()}/${pad(e.getMonth() + 1)}`; }
+function openReport(cid, mk) {
+  if (mk) rMonth = mk; const c = client(cid), d = monthData(c, rMonth), M = parse(rMonth), cur = rMonth === T().mes;
+  openSheet(sbar(['‹ ' + esc(c.name), `openClient(${cid},fromBoardFlag())`], 'Relatório') +
+    `<div class="rhero"><div class="top"><img src="icons/logo-96.jpg" alt=""><div><b>${esc(c.name)}</b><span>Relatório de conteúdo</span></div></div>` +
+    `<div class="rnums"><div><b>${d.vis.length}</b><span>visitas</span></div><div><b>${d.g}</b><span>gravados</span></div><div><b>${d.e}</b><span>editados</span></div><div><b>${d.p}</b><span>postados</span></div></div>` +
+    `<div class="mo"><button onclick="openReport(${cid},addMonths(rMonthGet(),-1))" aria-label="Mês anterior">‹</button><span>${cap(MESES[M.getMonth()])} ${M.getFullYear()}</span><button onclick="openReport(${cid},addMonths(rMonthGet(),1))" ${cur ? 'disabled' : ''} aria-label="Próximo mês">›</button></div></div>` +
+    (d.stock ? `<div class="stock"><div class="bx">${d.stock}</div><div><b>Material adiantado</b><span>${d.stock} vídeo${d.stock > 1 ? 's' : ''} pronto${d.stock > 1 ? 's' : ''} pra próxima semana</span></div></div>` : '') +
+    `<div class="gh"><h3>Gravações</h3></div><div class="grp">${d.vis.map((x) => { const dd = parse(x.dia); return `<div class="vis"><div class="dt"><b>${dd.getDate()}</b><span>${WD3[dd.getDay()].toLowerCase()}</span></div><div class="tx"><b>${esc(x.obs || 'Gravação')}</b><p>${dd.getDate()} de ${MESES[dd.getMonth()]}</p></div><span class="n">${x.qtd} vídeo${x.qtd > 1 ? 's' : ''}</span></div>`; }).join('') || '<div class="empty">Nenhuma gravação neste mês.</div>'}</div>` +
+    `<div class="gh"><h3>Postados por semana</h3></div><div class="grp">${d.weeks.map(([ws, n]) => { let b = ''; for (let i = 0; i < Math.max(c.meta, n); i++) b += `<i class="${i < n ? 'on' : ''}"></i>`; return `<div class="wk2"><div class="l">${wkLabel(ws)}<span>${n} de ${c.meta}</span></div><div class="bar">${b}</div></div>`; }).join('') || '<div class="empty">Nenhum vídeo postado neste mês.</div>'}</div>` +
+    `<button class="btn" style="display:flex;align-items:center;justify-content:center;gap:8px" onclick="makePDF(${cid})" id="pdfb">${SV.docW}</button><div style="height:24px"></div>`);
+}
+const rMonthGet = () => rMonth;
+function loadScript(src) { return new Promise((res, rej) => { if (document.querySelector(`script[src="${src}"]`)) return res(); const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = rej; document.head.appendChild(s); }); }
+async function imgData(url) { const b = await (await fetch(url)).blob(); return await new Promise((r) => { const f = new FileReader(); f.onload = () => r(f.result); f.readAsDataURL(b); }); }
+async function makePDF(cid) {
+  const btn = $('pdfb'); if (btn) { btn.disabled = true; btn.lastChild.textContent = 'Gerando…'; }
+  try {
+    await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+    const { jsPDF } = window.jspdf, c = client(cid), d = monthData(c, rMonth), M = parse(rMonth), per = `${cap(MESES[M.getMonth()])} ${M.getFullYear()}`;
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' }), W = 210, NAVY = [14, 26, 61], BLUE = [47, 95, 224], GRAY = [122, 130, 153];
+    doc.setFillColor(...NAVY); doc.rect(0, 0, W, 38, 'F');
+    try { doc.addImage(await imgData('icons/logo-96.jpg'), 'JPEG', 15, 9, 20, 20); } catch (e) { }
+    doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.text('IMPULSE MEDIA', 40, 18);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(159, 176, 214); doc.text('Relatório mensal de conteúdo', 40, 24);
+    doc.text('Período', W - 15, 16, { align: 'right' }); doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.text(per, W - 15, 23, { align: 'right' });
+    let y = 54; doc.setTextColor(...NAVY); doc.setFontSize(22); doc.text(c.name, 15, y);
+    if (c.ig) { doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(...GRAY); doc.text('@' + c.ig, 15, y + 6); }
+    y += 14; doc.setDrawColor(227, 231, 239); doc.line(15, y, W - 15, y); doc.line(15, y + 26, W - 15, y + 26);
+    const nums = [[d.vis.length, 'VISITAS'], [d.g, 'GRAVADOS'], [d.e, 'EDITADOS'], [d.p, 'POSTADOS']], cw = (W - 30) / 4;
+    nums.forEach(([n, l], i) => { const x = 15 + cw * i + cw / 2; if (i) doc.line(15 + cw * i, y, 15 + cw * i, y + 26); doc.setTextColor(...BLUE); doc.setFont('helvetica', 'bold'); doc.setFontSize(24); doc.text(String(n), x, y + 14, { align: 'center' }); doc.setTextColor(...GRAY); doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.text(l, x, y + 21, { align: 'center' }); });
+    y += 36; doc.setTextColor(40, 40, 40); doc.setFontSize(11);
+    const frase = `Neste mês gravamos ${d.g} vídeo${d.g !== 1 ? 's' : ''} em ${d.vis.length} visita${d.vis.length !== 1 ? 's' : ''} e publicamos ${d.p}.` + (d.stock ? ` ${d.stock} já ${d.stock > 1 ? 'estão prontos' : 'está pronto'} para a próxima semana.` : '');
+    doc.text(doc.splitTextToSize(frase, W - 30), 15, y); y += 14;
+    const sec = (t) => { if (y > 265) { doc.addPage(); y = 20; } doc.setTextColor(...NAVY); doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.text(t, 15, y); y += 7; };
+    sec('Visitas e gravações');
+    if (!d.vis.length) { doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(...GRAY); doc.text('Nenhuma gravação neste mês.', 15, y); y += 8; }
+    d.vis.forEach((x) => { if (y > 275) { doc.addPage(); y = 20; } const dd = parse(x.dia); doc.setFillColor(238, 242, 251); doc.roundedRect(15, y - 5, 13, 10, 2, 2, 'F'); doc.setTextColor(...NAVY); doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.text(String(dd.getDate()), 21.5, y + 0.5, { align: 'center' }); doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); doc.setTextColor(...GRAY); doc.text(WD3[dd.getDay()].toLowerCase(), 21.5, y + 3.8, { align: 'center' }); doc.setFontSize(10.5); doc.setTextColor(50, 50, 50); doc.text(x.obs || 'Gravação', 32, y + 1); doc.setTextColor(...BLUE); doc.setFont('helvetica', 'bold'); doc.text(`${x.qtd} vídeo${x.qtd > 1 ? 's' : ''}`, W - 15, y + 1, { align: 'right' }); doc.setDrawColor(240, 242, 246); doc.line(15, y + 7, W - 15, y + 7); y += 13; });
+    y += 4; sec('Vídeos postados por semana');
+    if (!d.weeks.length) { doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(...GRAY); doc.text('Nenhum vídeo postado neste mês.', 15, y); y += 8; }
+    d.weeks.forEach(([ws, n]) => { if (y > 275) { doc.addPage(); y = 20; } doc.setFont('helvetica', 'normal'); doc.setFontSize(10.5); doc.setTextColor(50, 50, 50); doc.text(wkLabel(ws), 15, y + 1); const tot = Math.max(c.meta, n), bw = 50 / tot; for (let i = 0; i < tot; i++) { doc.setFillColor(...(i < n ? BLUE : [227, 231, 239])); doc.roundedRect(W - 15 - 70 + i * bw, y - 1.5, bw - 1.2, 3, 1.5, 1.5, 'F'); } doc.setTextColor(...BLUE); doc.setFont('helvetica', 'bold'); doc.text(`${n} de ${c.meta}`, W - 15, y + 1, { align: 'right' }); doc.setDrawColor(240, 242, 246); doc.line(15, y + 6, W - 15, y + 6); y += 12; });
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(154, 161, 179); doc.text('Impulse Media', 15, 287); const t = T().d; doc.text(`Gerado em ${pad(t.getDate())}/${pad(t.getMonth() + 1)}/${t.getFullYear()}`, W - 15, 287, { align: 'right' });
+    const name = `Relatorio ${c.name} ${per}.pdf`.replace(/[\\/:*?"<>|]/g, '');
+    const blob = doc.output('blob'), file = new File([blob], name, { type: 'application/pdf' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file], title: name }); } catch (e) { } }
+    else { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove(); banner('PDF gerado', 'Salvo nos downloads.'); }
+  } catch (e) { console.error(e); banner('Não deu pra gerar o PDF', 'Confira a internet e tente de novo.'); }
+  if (btn) { btn.disabled = false; btn.lastChild.textContent = 'Gerar PDF e enviar'; }
 }
 async function undoPost(id, status) {
   const l = weekPosts(client(id)).list.filter((p) => p.status === status); if (!l.length) return;
@@ -402,7 +513,7 @@ function editClient(id) { openSheet(sbar(['Cancelar', `openClient(${id})`], 'Edi
 function askDelClient(id) { confirmSheet('Apagar ' + esc(client(id).name) + '?', 'Some também os posts e horários dele. Os pagamentos já recebidos continuam nas Finanças.', 'Apagar cliente', `delClient(${id})`, `editClient(${id})`); }
 async function delClient(id) {
   const n = client(id).name;
-  if (await act(async () => { await db.remove('clients', id); S.clients = S.clients.filter((c) => c.id !== id); S.schedule = S.schedule.filter((x) => x.client_id !== id); S.posts = S.posts.filter((x) => x.client_id !== id); S.edits = S.edits.filter((x) => x.client_id !== id); S.events = S.events.filter((x) => x.client_id !== id); S.tx.forEach((x) => { if (x.client_id === id) x.client_id = null; }); }, ['Cliente apagado', n])) closeSheet();
+  if (await act(async () => { await db.remove('clients', id); S.clients = S.clients.filter((c) => c.id !== id); S.schedule = S.schedule.filter((x) => x.client_id !== id); S.posts = S.posts.filter((x) => x.client_id !== id); S.edits = S.edits.filter((x) => x.client_id !== id); S.visits = S.visits.filter((x) => x.client_id !== id); S.events = S.events.filter((x) => x.client_id !== id); S.tx.forEach((x) => { if (x.client_id === id) x.client_id = null; }); }, ['Cliente apagado', n])) closeSheet();
 }
 
 /* lembretes */
@@ -671,7 +782,8 @@ function demoData() {
   tx.push({ id: tid++, tipo: 'saida', titulo: 'Canva Pro', cat: 'Ferramentas', valor: 34.9, data: dd(1), bill_id: 1, ref_mes: mes });
   for (let m = 1; m <= 5; m++) { const mk = addMonths(mes, -m), d = mk.slice(0, 8) + '10'; tx.push({ id: tid++, tipo: 'entrada', titulo: 'Mensalidades', cat: 'Mensalidade', valor: 5200 - m * 300, data: d }); tx.push({ id: tid++, tipo: 'saida', titulo: 'Gastos do mês', cat: 'Outros', valor: 900 + (m % 3) * 250, data: d }); }
   return {
-    clients, posts, edits: [{ id: 1, client_id: 1, week_start: ws }, { id: 2, client_id: 3, week_start: ws }, { id: 3, client_id: 3, week_start: ws }],
+    clients, posts, edits: [{ id: 1, client_id: 1, week_start: ws }, { id: 2, client_id: 3, week_start: ws }, { id: 3, client_id: 3, week_start: ws }, { id: 4, client_id: 2, week_start: ws }, { id: 5, client_id: 2, week_start: ws }, { id: 6, client_id: 2, week_start: ws }, { id: 7, client_id: 2, week_start: ws }],
+    visits: [{ id: 1, client_id: 1, dia: t.iso, qtd: 2, obs: 'Gravação na loja' }, { id: 2, client_id: 2, dia: ws, qtd: 5, obs: 'Fotos e vídeos' }, { id: 3, client_id: 3, dia: ws, qtd: 3, obs: '' }],
     client_schedule: [{ id: 1, client_id: 1, weekday: 3, hora: '09:00', titulo: 'Gravação dos vídeos' }, { id: 2, client_id: 2, weekday: 1, hora: '14:00', titulo: 'Fotos da semana' }, { id: 3, client_id: 6, weekday: t.wd, hora: '17:00', titulo: 'Gravação de treino' }],
     events: [],
     reminders: [{ id: 1, titulo: 'Postar vídeo da Rede Pop', client_id: 1, repetir: 'nunca', dia: iso(addDays(t.d, 1)), hora: '09:00', feito: false }, { id: 2, titulo: 'Mandar roteiro pra Clínica Sorriso', client_id: 5, repetir: 'nunca', dia: t.iso, hora: '14:00', feito: false }, { id: 3, titulo: 'Stories da Bella Estética', client_id: 2, repetir: 'dia', hora: '10:00', feito: false }, { id: 4, titulo: 'Planejar conteúdo da semana', client_id: null, repetir: 'semana', weekday: 1, hora: '08:00', feito: false }],
@@ -681,7 +793,7 @@ function demoData() {
 }
 
 /* expõe as funções usadas nos botões */
-Object.assign(window, { newPasswordSheet, markEdit, undoEdit, go, render, drawCList, openBoard, openClient, markPost, undoPost, receive, unpay, cobrar, newClient, saveClient, editClient, askDelClient, delClient, toggleRem, openRem, delRem, newReminder, remRepChange, saveRem, openEvent, delEvent, newEvent, saveEv, pickCat, newTx, openTx, saveTx, delTx, newBill, openBill, saveBill, toggleBill, delBill, openNotifs, openSettings, setTheme, setToggle, enablePush, testPush, closeSheet, doLogin, forgot, savePassword, logout, T, iso, parse, addDays, addMonths, monthKey });
+Object.assign(window, { newPasswordSheet, markEdit, undoEdit, newVisit, saveVisit, openVisit, delVisit, openReport, rMonthGet, makePDF, fromBoardFlag, go, render, drawCList, openBoard, openClient, markPost, undoPost, receive, unpay, cobrar, newClient, saveClient, editClient, askDelClient, delClient, toggleRem, openRem, delRem, newReminder, remRepChange, saveRem, openEvent, delEvent, newEvent, saveEv, pickCat, newTx, openTx, saveTx, delTx, newBill, openBill, saveBill, toggleBill, delBill, openNotifs, openSettings, setTheme, setToggle, enablePush, testPush, closeSheet, doLogin, forgot, savePassword, logout, T, iso, parse, addDays, addMonths, monthKey });
 Object.defineProperty(window, 'cFilter', { get: () => cFilter, set: (v) => { cFilter = v; } });
 Object.defineProperty(window, 'cQuery', { get: () => cQuery, set: (v) => { cQuery = v; } });
 Object.defineProperty(window, 'aDay', { get: () => aDay, set: (v) => { aDay = v; } });
